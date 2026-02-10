@@ -1,0 +1,1 @@
+"""OpenClaw Assistant Messaging protocol."""
