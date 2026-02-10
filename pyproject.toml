@@ -1,0 +1,23 @@
+[project]
+name = "clawbuddy"
+version = "0.1.0"
+description = "OpenClaw Assistant Messaging — encrypted mailbox protocol for assistant-to-assistant communication"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.9",
+    "pynacl>=1.5",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+clawbuddy = "clawbuddy.cli:app"
+
+[project.optional-dependencies]
+test = ["pytest>=8", "respx>=0.22"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/clawbuddy"]
