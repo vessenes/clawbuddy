@@ -143,6 +143,27 @@ OpenClaw EA Engagement Guide:
 
 \b
   Full guide: ea-engagement.tmpl (shipped with this package)
+
+\b
+Engagement presets:
+  Each channel can have local engagement instructions that tell your
+  assistant how to handle interactions with that counterpart. These are
+  local-only (never transmitted). Use --preset on add/accept/reinvite,
+  or manage with the `instructions` command.
+
+\b
+  Built-in presets (in presets/ directory):
+    safe-acquaintance   Minimal sharing, work hours only, digest mode.
+                        Default for new channels.
+    trusted-colleague   Extended hours, routine auto-confirm, proactive.
+    inner-circle        Full calendar, 24/7, auto-confirm, full context.
+    one-time            Single-purpose, expires after completion.
+
+\b
+  Managing instructions:
+    clawbuddy instructions <channel_id>                  View current
+    clawbuddy instructions <channel_id> --set <file>     Set from file
+    clawbuddy instructions <channel_id> --preset <name>  Set from preset
 """
 
 def _version_callback(value: bool) -> None:
@@ -202,6 +223,29 @@ def _load_onboard_template() -> str:
     return "ClawBuddy invite: {invite_url}"
 
 
+def _load_preset(preset_name: str, channel_name: str) -> str:
+    """Load a preset engagement template and populate with channel vars."""
+    from pathlib import Path
+
+    # Check config dir first (user override)
+    user_preset = config.get_config_dir() / "presets" / f"{preset_name}.tmpl"
+    if user_preset.exists():
+        tmpl = user_preset.read_text()
+        return tmpl.format(name=channel_name)
+
+    # Fall back to package-shipped presets
+    pkg_preset = Path(__file__).parent.parent.parent / "presets" / f"{preset_name}.tmpl"
+    if pkg_preset.exists():
+        tmpl = pkg_preset.read_text()
+        return tmpl.format(name=channel_name)
+
+    typer.echo(json.dumps({"error": f"unknown preset: {preset_name}"}), err=True)
+    raise typer.Exit(1)
+
+
+PRESET_NAMES = ["safe-acquaintance", "trusted-colleague", "inner-circle", "one-time"]
+
+
 def _get_sender_name() -> str:
     """Read sender_name from config.toml, fall back to empty."""
     import tomllib
@@ -217,6 +261,7 @@ def add(
     phone: str,
     name: str = typer.Option("", help="Display name for this contact"),
     sender: str = typer.Option("", "--sender", "-s", help="Your name for the invite message"),
+    preset: str = typer.Option("safe-acquaintance", help="Engagement preset for this channel"),
     pretty: bool = PRETTY,
 ) -> None:
     """Invite a contact by phone number.
@@ -243,13 +288,17 @@ def add(
 
     config.save_private_key(channel_id, priv)
 
+    display_name = name or phone
+    instructions_text = _load_preset(preset, display_name)
+
     channels_dict = config.load_channels()
     channels_dict[channel_id] = {
-        "name": name or phone,
+        "name": display_name,
         "phone": phone,
         "status": "pending",
         "their_pub": None,
         "our_pub": pub_b64,
+        "instructions": instructions_text,
         "created_at": _now_iso(),
         "last_seen": None,
     }
@@ -258,7 +307,7 @@ def add(
     invite_url = _build_invite_url(mailbox_url, channel_id, pub_b64)
 
     sender_name = sender or _get_sender_name()
-    recipient_name = name or phone
+    recipient_name = display_name
     tmpl = _load_onboard_template()
     message = tmpl.format(
         invite_url=invite_url,
@@ -324,6 +373,7 @@ def check(pretty: bool = PRETTY) -> None:
                 "seq": wire.seq,
                 "unsafe_subject": decrypted.unsafe_subject,
                 "unsafe_body": decrypted.unsafe_body,
+                "instructions": chan.get("instructions", ""),
             })
             # Ack
             mailbox.delete_message(mailbox_url, cid, wire.seq)
@@ -387,7 +437,11 @@ def channels(pretty: bool = PRETTY) -> None:
 
 
 @app.command()
-def accept(url: str, pretty: bool = PRETTY) -> None:
+def accept(
+    url: str,
+    preset: str = typer.Option("safe-acquaintance", help="Engagement preset for this channel"),
+    pretty: bool = PRETTY,
+) -> None:
     """Accept an invite URL to join a channel.
 
     Parses the invite URL to extract the channel ID and the inviter's
@@ -418,13 +472,17 @@ def accept(url: str, pretty: bool = PRETTY) -> None:
     # Post our public key to complete the handshake
     mailbox.post_handshake(mailbox_url, channel_id, pub_b64)
 
+    display_name = f"invite-{channel_id[:8]}"
+    instructions_text = _load_preset(preset, display_name)
+
     channels_dict = config.load_channels()
     channels_dict[channel_id] = {
-        "name": f"invite-{channel_id[:8]}",
+        "name": display_name,
         "phone": None,
         "status": "active",
         "their_pub": their_pub_b64,
         "our_pub": pub_b64,
+        "instructions": instructions_text,
         "created_at": _now_iso(),
         "last_seen": None,
     }
@@ -435,7 +493,11 @@ def accept(url: str, pretty: bool = PRETTY) -> None:
 
 
 @app.command()
-def reinvite(phone: str, pretty: bool = PRETTY) -> None:
+def reinvite(
+    phone: str,
+    preset: str = typer.Option("", help="Engagement preset (default: carry forward existing)"),
+    pretty: bool = PRETTY,
+) -> None:
     """Rotate keys and send a fresh invite to an existing contact.
 
     Finds the existing channel for PHONE, marks it as superseded,
@@ -451,14 +513,24 @@ def reinvite(phone: str, pretty: bool = PRETTY) -> None:
     # Find existing channel for this phone
     old_cid = None
     old_name = phone
+    old_instructions = ""
     for cid, chan in channels_dict.items():
         if chan["phone"] == phone and chan["status"] != "superseded":
             old_cid = cid
             old_name = chan["name"]
+            old_instructions = chan.get("instructions", "")
             break
 
     if old_cid:
         channels_dict[old_cid]["status"] = "superseded"
+
+    # Determine instructions: --preset overrides, otherwise carry forward
+    if preset:
+        instructions_text = _load_preset(preset, old_name)
+    elif old_instructions:
+        instructions_text = old_instructions
+    else:
+        instructions_text = _load_preset("safe-acquaintance", old_name)
 
     # Create new channel
     channel_id = _make_channel_id()
@@ -473,6 +545,7 @@ def reinvite(phone: str, pretty: bool = PRETTY) -> None:
         "status": "pending",
         "their_pub": None,
         "our_pub": pub_b64,
+        "instructions": instructions_text,
         "created_at": _now_iso(),
         "last_seen": None,
     }
@@ -488,3 +561,53 @@ def reinvite(phone: str, pretty: bool = PRETTY) -> None:
         "status": "pending",
     }, pretty)
     check_for_upgrade()
+
+
+@app.command()
+def instructions(
+    channel: str,
+    set: str = typer.Option("", "--set", help="Set instructions from a file path"),
+    preset: str = typer.Option("", "--preset", help="Set instructions from a built-in preset"),
+    pretty: bool = PRETTY,
+) -> None:
+    """View or update engagement instructions for a channel.
+
+    Without --set or --preset, displays the current instructions.
+
+    With --set, reads the file at the given path and stores its content
+    as the channel's engagement instructions.
+
+    With --preset, loads a built-in preset template (safe-acquaintance,
+    trusted-colleague, inner-circle, one-time).
+
+    Instructions are local-only — they are never encrypted or sent over
+    the wire. They tell your assistant how to handle interactions with
+    this counterpart.
+
+    Output: {"channel_id": "...", "instructions": "..."}
+    """
+    channels_dict = config.load_channels()
+    if channel not in channels_dict:
+        typer.echo(json.dumps({"error": f"unknown channel: {channel}"}), err=True)
+        raise typer.Exit(1)
+
+    chan = channels_dict[channel]
+
+    if set and preset:
+        typer.echo(json.dumps({"error": "use --set or --preset, not both"}), err=True)
+        raise typer.Exit(1)
+
+    if set:
+        from pathlib import Path
+        p = Path(set)
+        if not p.exists():
+            typer.echo(json.dumps({"error": f"file not found: {set}"}), err=True)
+            raise typer.Exit(1)
+        chan["instructions"] = p.read_text()
+        config.save_channels(channels_dict)
+
+    elif preset:
+        chan["instructions"] = _load_preset(preset, chan["name"])
+        config.save_channels(channels_dict)
+
+    _out({"channel_id": channel, "instructions": chan.get("instructions", "")}, pretty)
