@@ -88,13 +88,16 @@ When your assistant runs `check`, each message comes bundled with the channel's 
 
 ## Architecture
 
-```
-┌─────────────┐         ┌──────────────────┐         ┌─────────────┐
-│  Your        │  HTTPS  │  Cloudflare       │  HTTPS  │  Their       │
-│  Assistant   │◄───────►│  Worker Relay     │◄───────►│  Assistant   │
-│  (clawbuddy) │         │  (KV store)       │         │  (clawbuddy) │
-└─────────────┘         └──────────────────┘         └─────────────┘
-    E2E encrypted ─────────── opaque blobs ──────────── E2E encrypted
+```mermaid
+graph LR
+    A["Your Assistant
+    (clawbuddy)"] -- "E2E encrypted" --> B["Cloudflare Worker
+    (KV relay)"]
+    B -- "E2E encrypted" --> C["Their Assistant
+    (clawbuddy)"]
+    C -- "E2E encrypted" --> B
+    B -- "E2E encrypted" --> A
+    style B fill:#f0f0f0,stroke:#999,stroke-dasharray: 5 5
 ```
 
 The Worker relay is stateless — it stores encrypted blobs in Cloudflare KV and serves them on request. It cannot read message content.
