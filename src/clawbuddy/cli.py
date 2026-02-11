@@ -9,8 +9,9 @@ from urllib.parse import parse_qs, urlparse
 
 import typer
 
-from clawbuddy import config, crypto, mailbox, schema
+from clawbuddy import __version__, config, crypto, mailbox, schema
 from clawbuddy.send import send_imessage
+from clawbuddy.version_check import check_for_upgrade
 
 APP_HELP = """\
 Encrypted assistant-to-assistant messaging. ClawBuddy lets AI assistants
@@ -144,7 +145,22 @@ OpenClaw EA Engagement Guide:
   Full guide: ea-engagement.tmpl (shipped with this package)
 """
 
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"clawbuddy {__version__}")
+        raise typer.Exit()
+
+
 app = typer.Typer(name="clawbuddy", help=APP_HELP, no_args_is_help=True)
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(False, "--version", "-V", callback=_version_callback,
+                                 is_eager=True, help="Print version and exit"),
+) -> None:
+    pass
+
 
 PRETTY = typer.Option(False, "--pretty", help="Human-readable output")
 
@@ -168,18 +184,55 @@ def _build_invite_url(mailbox_url: str, channel_id: str, pub_b64: str) -> str:
     return f"{mailbox_url}/invite?channel={channel_id}&pub={pub_b64}"
 
 
+def _load_onboard_template() -> str:
+    """Load onboard.tmpl from package directory or config dir."""
+    from pathlib import Path
+
+    # Check config dir first (user override)
+    user_tmpl = config.get_config_dir() / "onboard.tmpl"
+    if user_tmpl.exists():
+        return user_tmpl.read_text()
+
+    # Fall back to package-shipped template
+    pkg_tmpl = Path(__file__).parent.parent.parent / "onboard.tmpl"
+    if pkg_tmpl.exists():
+        return pkg_tmpl.read_text()
+
+    # Bare fallback
+    return "ClawBuddy invite: {invite_url}"
+
+
+def _get_sender_name() -> str:
+    """Read sender_name from config.toml, fall back to empty."""
+    import tomllib
+    config_file = config.get_config_dir() / "config.toml"
+    if config_file.exists():
+        cfg = tomllib.loads(config_file.read_text())
+        return cfg.get("sender_name", "")
+    return ""
+
+
 @app.command()
 def add(
     phone: str,
     name: str = typer.Option("", help="Display name for this contact"),
+    sender: str = typer.Option("", "--sender", "-s", help="Your name for the invite message"),
     pretty: bool = PRETTY,
 ) -> None:
     """Invite a contact by phone number.
 
     Generates an X25519 keypair and a unique channel ID, saves the private
     key locally, builds an invite URL containing the channel ID and public
-    key, and sends it to PHONE via iMessage. The channel starts in
-    "pending" status until the recipient runs `accept`.
+    key, and sends an onboarding message to PHONE via iMessage.
+
+    The onboarding message is loaded from onboard.tmpl (check
+    ~/.config/clawbuddy/onboard.tmpl for a user override). It includes
+    setup instructions and the accept command.
+
+    Use --sender to set your name in the message, or configure
+    sender_name in ~/.config/clawbuddy/config.toml.
+
+    The channel starts in "pending" status until the recipient runs `accept`.
 
     Output: {"channel_id": "...", "invite_url": "...", "status": "pending"}
     """
@@ -204,9 +257,22 @@ def add(
 
     invite_url = _build_invite_url(mailbox_url, channel_id, pub_b64)
 
-    send_imessage(phone, f"ClawBuddy invite: {invite_url}")
+    sender_name = sender or _get_sender_name()
+    recipient_name = name or phone
+    tmpl = _load_onboard_template()
+    message = tmpl.format(
+        invite_url=invite_url,
+        recipient_name=recipient_name,
+        sender_name=sender_name,
+        channel_id=channel_id,
+        mailbox_url=mailbox_url,
+        public_key=pub_b64,
+    )
+
+    send_imessage(phone, message)
 
     _out({"channel_id": channel_id, "invite_url": invite_url, "status": "pending"}, pretty)
+    check_for_upgrade()
 
 
 @app.command()
@@ -267,6 +333,7 @@ def check(pretty: bool = PRETTY) -> None:
             config.save_channels(channels_dict)
 
     _out(results, pretty)
+    check_for_upgrade()
 
 
 @app.command("send")
@@ -305,6 +372,7 @@ def send_cmd(
 
     result = mailbox.post_message(config.get_mailbox_url(), channel, payload_b64)
     _out(result, pretty)
+    check_for_upgrade()
 
 
 @app.command()
@@ -363,6 +431,7 @@ def accept(url: str, pretty: bool = PRETTY) -> None:
     config.save_channels(channels_dict)
 
     _out({"channel_id": channel_id, "status": "active"}, pretty)
+    check_for_upgrade()
 
 
 @app.command()
@@ -418,3 +487,4 @@ def reinvite(phone: str, pretty: bool = PRETTY) -> None:
         "superseded": old_cid,
         "status": "pending",
     }, pretty)
+    check_for_upgrade()
