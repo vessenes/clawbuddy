@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clawbuddy-mailbox",
+  "main": "src/index.js",
+  "compatibility_date": "2025-02-04",
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "MAILBOX",
+      "id": "YOUR_KV_NAMESPACE_ID"
+    }
+  ]
+}
