@@ -55,4 +55,4 @@ def test_get_mailbox_url_from_toml(tmp_path, monkeypatch):
 
 def test_get_mailbox_url_default(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAWBUDDY_MAILBOX_URL", raising=False)
-    assert config.get_mailbox_url() == "https://clawbuddy-mailbox.workers.dev"
+    assert config.get_mailbox_url() == "https://clawbuddy-mailbox.peter-078.workers.dev"

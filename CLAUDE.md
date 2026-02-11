@@ -13,4 +13,4 @@ OpenClaw Assistant Messaging — a protocol for openclaw assistants to communica
 - Prompt templates for LLM calls go in `.tmpl` text files — never inline strings
 - API keys configured via `~/.peoplesearch/config.toml` or environment variables
 - Use `bd` (beads) for issue tracking
-- Use `uvx showtime --help` to generate demo docs for tools
+- Use `uvx showboat --help` to generate demo docs for tools

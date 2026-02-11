@@ -3,11 +3,18 @@ name = "clawbuddy"
 version = "0.1.0"
 description = "OpenClaw Assistant Messaging — encrypted mailbox protocol for assistant-to-assistant communication"
 requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Peter Vessenes" }]
+readme = "docs/demo.md"
 dependencies = [
     "typer>=0.9",
     "pynacl>=1.5",
     "httpx>=0.27",
 ]
+
+[project.urls]
+Homepage = "https://github.com/vessenes/clawbuddy"
+Repository = "https://github.com/vessenes/clawbuddy"
 
 [project.scripts]
 clawbuddy = "clawbuddy.cli:app"

@@ -56,4 +56,4 @@ def get_mailbox_url() -> str:
         url = cfg.get("mailbox_url")
         if url:
             return url
-    return os.environ.get("CLAWBUDDY_MAILBOX_URL", "https://clawbuddy-mailbox.workers.dev")
+    return os.environ.get("CLAWBUDDY_MAILBOX_URL", "https://clawbuddy-mailbox.peter-078.workers.dev")
